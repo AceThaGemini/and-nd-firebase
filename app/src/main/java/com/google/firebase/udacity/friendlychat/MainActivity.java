@@ -23,6 +23,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -35,6 +36,8 @@ import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import com.firebase.ui.auth.AuthUI;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.ChildEventListener;
@@ -44,6 +47,7 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -169,7 +173,8 @@ public class MainActivity extends AppCompatActivity {
                             AuthUI.getInstance()
                                     .createSignInIntentBuilder()
                                     .setIsSmartLockEnabled(false)
-                                    .setProviders(Arrays.asList(new AuthUI.IdpConfig.Builder(AuthUI.EMAIL_PROVIDER).build(),
+                                    .setProviders(Arrays.asList(
+                                            new AuthUI.IdpConfig.Builder(AuthUI.EMAIL_PROVIDER).build(),
                                             new AuthUI.IdpConfig.Builder(AuthUI.GOOGLE_PROVIDER).build()))
                                     .build(),
                             RC_SIGN_IN);
@@ -195,15 +200,34 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, "Sign in cancelled!", Toast.LENGTH_SHORT).show();
                     finish();
                     overridePendingTransition(0, 0);
-
             }
+
         } else if (requestCode == RC_PHOTO_PICK && resultCode == RESULT_OK) {
             Uri selectedPhotoUri = data.getData();
             // new child storageRef
             StorageReference photoRef =
                     chatPhotosStorageReference.child(selectedPhotoUri.getLastPathSegment());
+            // TODO: 3/20/17 save to firebaseStorage
+            // save photo to firebaseStorage
+            UploadTask uploadTask = photoRef.putFile(selectedPhotoUri);
 
-            // save to firebaseStorageg
+            uploadTask.addOnFailureListener(new OnFailureListener() {
+                @Override
+                public void onFailure(@NonNull Exception e) {
+
+                }
+            }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+                @Override
+                public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                    @SuppressWarnings("VisibleForTests") Uri photoDownloadUri = taskSnapshot.getDownloadUrl();
+
+                    assert photoDownloadUri != null;
+                    FriendlyMessage friendlyMessage =
+                            new FriendlyMessage(null, mUsername, photoDownloadUri.toString());
+
+                    messagesDatabaseReference.push().setValue(friendlyMessage);
+                }
+            });
 
         }
     }
@@ -219,6 +243,7 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.sign_out_menu:
+                onSignedOutTearDown();
                 AuthUI.getInstance().signOut(this);
                 return true;
             default:
@@ -268,22 +293,19 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void onChildChanged(DataSnapshot dataSnapshot, String s) {
-
                 }
 
                 @Override
                 public void onChildRemoved(DataSnapshot dataSnapshot) {
-
                 }
 
                 @Override
                 public void onChildMoved(DataSnapshot dataSnapshot, String s) {
-
                 }
 
                 @Override
                 public void onCancelled(DatabaseError databaseError) {
-
+                    Log.d(TAG, "childEventListener:onCancelled: " + databaseError.getMessage());
                 }
             };
             // listen to databaseReference changes
