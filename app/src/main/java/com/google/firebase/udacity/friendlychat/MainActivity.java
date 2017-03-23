@@ -45,13 +45,17 @@ import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -59,6 +63,7 @@ public class MainActivity extends AppCompatActivity {
 
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
+    public static final String MESSAGE_LENGTH_KEY = "message_length_limit";
 
     // an arbitrary request code value
     private static final int RC_SIGN_IN = 20;
@@ -81,6 +86,7 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseAuth.AuthStateListener authStateListener;
     private FirebaseStorage firebaseStorage;
     private StorageReference chatPhotosStorageReference;
+    private FirebaseRemoteConfig firebaseRemoteConfig;
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -90,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
         firebaseDatabase = FirebaseDatabase.getInstance();
         firebaseAuth = FirebaseAuth.getInstance();
         firebaseStorage = FirebaseStorage.getInstance();
+        firebaseRemoteConfig = FirebaseRemoteConfig.getInstance();
 
         messagesDatabaseReference = firebaseDatabase.getReference().child("messages");
         chatPhotosStorageReference = firebaseStorage.getReference().child("chat_photos");
@@ -185,6 +192,20 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
+
+        FirebaseRemoteConfigSettings remoteConfigSettings =
+                new FirebaseRemoteConfigSettings.Builder()
+                        .setDeveloperModeEnabled(BuildConfig.DEBUG)
+                        .build();
+        firebaseRemoteConfig.setConfigSettings(remoteConfigSettings);
+
+        Map<String, Object> defaultConfigValues = new HashMap<>();
+        defaultConfigValues.put(MESSAGE_LENGTH_KEY, DEFAULT_MSG_LENGTH_LIMIT);
+        // add firebase remote config default values
+        firebaseRemoteConfig.setDefaults(defaultConfigValues);
+
+        //fetch for any changes in the Firebase remoteConfigs
+        fetchConfigs();
     }
 
     // return results from activities started on startActivityForResult()
@@ -318,5 +339,37 @@ public class MainActivity extends AppCompatActivity {
             messagesDatabaseReference.removeEventListener(childEventListener);
             childEventListener = null;
         }
+    }
+
+    private void fetchConfigs() {
+        long cacheExpiration = 3600; // 1hr for production builds
+
+        if (firebaseRemoteConfig.getInfo().getConfigSettings().isDeveloperModeEnabled())
+            cacheExpiration = 0; // for debug builds
+
+        firebaseRemoteConfig.fetch(cacheExpiration).addOnSuccessListener(new OnSuccessListener<Void>() {
+            @Override
+            public void onSuccess(Void aVoid) {
+                firebaseRemoteConfig.activateFetched();
+                // apply the new update values to the app
+                onApplyNewConfigs();
+            }
+        }).addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Log.d(TAG, "Error in fetching configs!", e);
+                // also apply configs, not from remote, from cache
+                onApplyNewConfigs();
+            }
+        });
+    }
+
+    private void onApplyNewConfigs() {
+        Long fetched_message_limit = firebaseRemoteConfig.getLong(MESSAGE_LENGTH_KEY);
+        // set new value of message limit to editText
+        mMessageEditText.setFilters(
+                new InputFilter[]{new InputFilter.LengthFilter(fetched_message_limit.intValue())});
+
+        Log.d(TAG, MESSAGE_LENGTH_KEY + " = " + fetched_message_limit);
     }
 }
